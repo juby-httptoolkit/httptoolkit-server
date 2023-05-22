@@ -14,7 +14,6 @@ import { isErrorLike } from '../util/error';
 import { canAccess, readFile } from '../util/fs';
 import { windowsClose } from '../util/process-management';
 import { getTerminalEnvVars, OVERRIDES_DIR } from './terminal/terminal-env-overrides';
-import { reportError, addBreadcrumb } from '../error-tracking';
 import { findExecutableInApp } from '@httptoolkit/osx-find-executable';
 
 const isAppBundle = (path: string) => {
@@ -82,7 +81,7 @@ export class ElectronInterceptor implements Interceptor {
         let retries = 10;
 
         appProcess.on('error', async (e) => {
-            reportError(e);
+            console.warn(e);
 
             if (debugClient) {
                 // Try to close the debug connection if open, but very carefully
@@ -149,11 +148,6 @@ export class ElectronInterceptor implements Interceptor {
         if (injectionResult.exceptionDetails) {
             const exception = injectionResult.exceptionDetails as any;
             console.log(exception);
-
-            addBreadcrumb("Evaluate error", {
-                message: exception && exception.description,
-                data: injectionResult.exceptionDetails as { [key: string]: any }
-            });
 
             throw new Error("Failed to inject into Electron app");
         }

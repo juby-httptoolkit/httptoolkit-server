@@ -1,4 +1,4 @@
-HTTP Toolkit Server [![Build Status](https://github.com/httptoolkit/httptoolkit-server/workflows/CI/badge.svg)](https://github.com/httptoolkit/httptoolkit-server/actions) [![Version](https://img.shields.io/npm/v/httptoolkit-server.svg)](https://npmjs.org/package/httptoolkit-server)
+HTTP Toolkit Server [![Build Status](https://github.com/juby-httptoolkit/httptoolkit-server/workflows/CI/badge.svg)](https://github.com/juby-httptoolkit/httptoolkit-server/actions) [![Version](https://img.shields.io/npm/v/httptoolkit-server.svg)](https://npmjs.org/package/httptoolkit-server)
 ===================
 
 This repo contains the backend for [HTTP Toolkit](https://httptoolkit.tech), a beautiful, cross-platform & open-source HTTP(S) debugging proxy, analyzer & client.
@@ -7,7 +7,7 @@ Looking to file bugs, request features or send feedback? File an issue or vote o
 
 ## What is this?
 
-HTTP Toolkit runs everything possible within [the web UI](https://github.com/httptoolkit/httptoolkit-ui), written as a standard single-page web application. There's a couple of necessary things you can't do in a web application though, especially:
+HTTP Toolkit runs everything possible within [the web UI](https://github.com/juby-httptoolkit/juby-httptoolkit.github.io), written as a standard single-page web application. There's a couple of necessary things you can't do in a web application though, especially:
 
 * Start a locally running proxy server (here using [Mockttp](https://npmjs.com/package/mockttp))
 * Launch local applications preconfigured for interception
@@ -32,13 +32,13 @@ To get started:
 * `npm install`
 * `npm start`
 * A [Mockttp](https://npmjs.com/package/mockttp) standalone server will start on port 45456, and a graphql management server on 45457.
-* Either make requests to the servers by hand, use the production UI by opening `https://app.httptoolkit.tech` in a Chromium-based browser, or start and use a local UI by:
-    * Setting up the web UI locally (see [httptoolkit/httptoolkit-ui#contributing](https://github.com/httptoolkit/httptoolkit-ui#contributing)).
+* Either make requests to the servers by hand, use the production UI by opening `https://juby-httptoolkit.github.io` in a Chromium-based browser, or start and use a local UI by:
+    * Setting up the web UI locally (see [juby-httptoolkit/juby-httptoolkit.github.io#contributing](https://github.com/httptoolkit/httptoolkit-ui#contributing)).
     * Running `npm run start:web` there to start the UI without its own server.
     * Opening `http://local.httptoolkit.tech:8080` in a Chromium-based browser
 
 A few tips:
 
 * Running the server with `ENABLE_PLAYGROUND` set to `true` at the top of [`src/api-server.ts`](src/api-server.ts#L16) will give you a GraphQL playground on http://localhost:45457/.
-* New interceptors need to be added to `src/interceptors/index.ts`. They will also need to be added to [the UI](https://github.com/httptoolkit/httptoolkit-ui).
+* New interceptors need to be added to `src/interceptors/index.ts`. They will also need to be added to [the UI](https://github.com/juby-httptoolkit/juby-httptoolkit.github.io).
 * The tests assume that the required applications are installed and some docker images are already pulled. See [ci.yml](.github/workflows/ci.yml) and the [build-base](https://github.com/httptoolkit/act-build-base/) image for an example of how to set this up (or just run the tests, look at the errors, and install whatever's missing).

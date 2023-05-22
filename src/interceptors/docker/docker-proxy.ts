@@ -11,7 +11,6 @@ import { AbortController } from 'node-abort-controller';
 import { chmod, deleteFile, readDir } from '../../util/fs';
 import { rawHeadersToHeaders } from '../../util/http';
 import { makeDestroyable, DestroyableServer } from 'destroyable-server';
-import { reportError } from '../../error-tracking';
 import { addShutdownHandler } from '../../shutdown';
 
 import {
@@ -152,7 +151,7 @@ async function createDockerProxy(
         if (reqPath.match(BUILD_IMAGE_MATCHER)) {
             if (reqUrl.searchParams.get('remote')) {
                 res.writeHead(400);
-                reportError("Build interception failed due to unsupported 'remote' param");
+                console.warn("Build interception failed due to unsupported 'remote' param");
 
                 if (reqUrl.searchParams.get('remote') === 'client-session') {
                     res.end("HTTP Toolkit does not yet support BuildKit-powered builds");

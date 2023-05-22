@@ -4,8 +4,6 @@ import Docker from 'dockerode';
 import * as EventStream from 'event-stream';
 import * as mobx from 'mobx';
 
-import { reportError } from '../../error-tracking';
-
 import { isInterceptedContainer } from './docker-commands';
 import { isDockerAvailable } from './docker-interception-services';
 import { updateDockerTunnelledNetworks } from './docker-tunnel-proxy';
@@ -96,7 +94,7 @@ export async function monitorDockerNetworkAliases(proxyPort: number): Promise<Do
         const stream = getDockerEventStream(docker);
         stream.on('error', (e) => {
             console.log(`Docker stream for port ${proxyPort} hit an error`);
-            reportError(e);
+            console.warn(e);
         });
 
         const dnsServer = await getDnsServer(proxyPort);

@@ -1,7 +1,6 @@
 import * as stream from 'stream';
 import * as path from 'path';
 import adb, * as Adb from '@devicefarmer/adbkit';
-import { reportError } from '../../error-tracking';
 import { isErrorLike } from '../../util/error';
 import { delay, waitUntil } from '../../util/promise';
 import { getCertificateFingerprint, parseCert } from '../../certificates';
@@ -34,7 +33,7 @@ export function createAdbClient() {
 
     // We listen for errors and report them. This only happens if adbkit completely
     // fails to handle or listen to a connection error. We'd rather report that than crash.
-    client.on('error', reportError);
+    client.on('error', console.warn);
 
     return client;
 }
@@ -91,7 +90,7 @@ export const getConnectedDevices = batchCalls(async (adbClient: Adb.Client) => {
             }
             return [];
         } else {
-            reportError(e);
+            console.warn(e);
             throw e;
         }
     }

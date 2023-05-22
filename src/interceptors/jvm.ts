@@ -6,7 +6,6 @@ import { Interceptor } from '.';
 import { HtkConfig } from '../config';
 import { spawnToResult, waitForExit } from '../util/process-management';
 import { OVERRIDE_JAVA_AGENT } from './terminal/terminal-env-overrides';
-import { reportError } from '../error-tracking';
 import { delay } from '../util/promise';
 import { commandExists, canAccess } from '../util/fs';
 import { ErrorLike } from '../util/error';
@@ -89,7 +88,7 @@ const javaBinPromise: Promise<string | false> = (async () => {
         } else {
             // If we find any other unexpected Java errors, we report them, to aid with debugging and
             // detecting issues with unusual JVMs.
-            reportError(new Error(`JVM attach test failed unusually - exited with ${unusualJavaErrors[0].output.exitCode}`));
+            console.warn(new Error(`JVM attach test failed unusually - exited with ${unusualJavaErrors[0].output.exitCode}`));
         }
         return false;
     } else if (bestJava) {
@@ -99,7 +98,7 @@ const javaBinPromise: Promise<string | false> = (async () => {
         return false;
     }
 })().catch((e) => {
-    reportError(e);
+    console.warn(e);
     return false;
 });
 
@@ -183,7 +182,7 @@ export class JvmInterceptor implements Interceptor {
         );
 
         if (listTargetsOutput.exitCode !== 0) {
-            reportError(`JVM target lookup failed with status ${listTargetsOutput.exitCode}`);
+            console.warn(`JVM target lookup failed with status ${listTargetsOutput.exitCode}`);
             return [];
         }
 

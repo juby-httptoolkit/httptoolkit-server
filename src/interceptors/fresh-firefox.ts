@@ -4,7 +4,6 @@ import { SpawnOptions } from 'child_process';
 
 import { APP_ROOT } from '../constants';
 import { HtkConfig } from '../config';
-import { reportError } from '../error-tracking';
 
 import { getAvailableBrowsers, launchBrowser, BrowserInstance } from '../browsers';
 import { delay } from '../util/promise';
@@ -191,7 +190,7 @@ export class FreshFirefox implements Interceptor {
         );
         await messageServer.start();
 
-        let messageShown: Promise<void> | true = messageServer.waitForSuccess().catch(reportError);
+        let messageShown: Promise<void> | true = messageServer.waitForSuccess().catch(console.warn);
 
         profileSetupBrowser = await this.startFirefox(messageServer);
         profileSetupBrowser.process.once('close', (exitCode) => {
@@ -200,7 +199,7 @@ export class FreshFirefox implements Interceptor {
             profileSetupBrowser = undefined;
 
             if (messageShown !== true) {
-                reportError(`Firefox profile setup failed with code ${exitCode}`);
+                console.warn(`Firefox profile setup failed with code ${exitCode}`);
                 deleteFolder(this.firefoxProfilePath).catch(console.warn);
             }
         });
@@ -279,7 +278,7 @@ export class FreshFirefox implements Interceptor {
             certCheckSuccessful = true;
         }).catch((e) => {
             certCheckSuccessful = false;
-            reportError(e);
+            console.warn(e);
         });
 
         browsers[proxyPort] = browser;
@@ -295,7 +294,7 @@ export class FreshFirefox implements Interceptor {
             certCheckServer.stop();
 
             if (!certCheckSuccessful) {
-                reportError(`Firefox certificate check ${
+                console.warn(`Firefox certificate check ${
                     certCheckSuccessful === false
                         ? "failed"
                         : "did not complete"

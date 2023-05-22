@@ -6,7 +6,6 @@ import { findExecutableById } from '@httptoolkit/osx-find-executable';
 
 import { Interceptor } from '..';
 import { HtkConfig } from '../../config';
-import { reportError, addBreadcrumb } from '../../error-tracking';
 import { isErrorLike } from '../../util/error';
 import { canAccess, commandExists } from '../../util/fs';
 import { spawnToResult } from '../../util/process-management';
@@ -32,8 +31,7 @@ const getTerminalCommand = _.memoize(async (): Promise<SpawnArgs | null> => {
     else result = Promise.resolve(null);
 
     result.then((terminal) => {
-        if (terminal) addBreadcrumb('Found terminal', { data: { terminal } });
-        else reportError('No terminal could be detected');
+        if (!terminal) console.warn('No terminal could be detected');
     });
 
     return result;
@@ -127,7 +125,7 @@ const getXTerminalCommand = async (command = 'x-terminal-emulator'): Promise<Spa
             // Bizarrely, rxvt -h prints help but always returns a non-zero exit code.
             // Doesn't need any special arguments anyway though, so just ignore it
         } else {
-            reportError(e);
+            console.warn(e);
         }
     }
 
@@ -247,7 +245,7 @@ export class FreshTerminalInterceptor implements Interceptor {
         };
         childProc.once('close', onTerminalClosed);
         childProc.once('error', (e) => {
-            reportError(e);
+            console.warn(e);
             onTerminalClosed();
         });
 

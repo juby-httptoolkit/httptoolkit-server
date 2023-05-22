@@ -13,7 +13,6 @@ import { generateSPKIFingerprint } from 'mockttp';
 import { getSystemProxy } from 'os-proxy-config';
 
 import { HtkConfig } from './config';
-import { reportError, addBreadcrumb } from './error-tracking';
 import { buildInterceptors, Interceptor, ActivationError } from './interceptors';
 import { ALLOWED_ORIGINS, SERVER_VERSION } from './constants';
 import { delay } from './util/promise';
@@ -99,7 +98,7 @@ const typeDefs = gql`
 const withFallback = <R>(p: () => Promise<R>, timeoutMs: number, defaultValue: R) =>
     Promise.race([
         p().catch((error) => {
-            reportError(error);
+            console.warn(error);
             return defaultValue;
         }),
         delay(timeoutMs).then(() => defaultValue)
@@ -130,7 +129,7 @@ const buildResolvers = (
             }),
             networkInterfaces: () => os.networkInterfaces(),
             systemProxy: () => getSystemProxy().catch((e) => {
-                reportError(e);
+                console.warn(e);
                 return undefined;
             }),
             dnsServers: async (__: void, { proxyPort }: { proxyPort: number }): Promise<string[]> => {
@@ -148,25 +147,22 @@ const buildResolvers = (
                 proxyPort: number,
                 options: unknown
             }) => {
-                addBreadcrumb(`Activating ${id}`, { category: 'interceptor', data: { id, options } });
-
                 const interceptor = interceptors[id];
                 if (!interceptor) throw new Error(`Unknown interceptor ${id}`);
 
                 // After 30s, don't stop activating, but report an error if we're not done yet
                 let activationDone = false;
                 delay(30000).then(() => {
-                    if (!activationDone) reportError(`Timeout activating ${id}`)
+                    if (!activationDone) console.warn(`Timeout activating ${id}`)
                 });
 
                 const result = await interceptor.activate(proxyPort, options).catch((e) => e);
                 activationDone = true;
 
                 if (isActivationError(result)) {
-                    if (result.reportable !== false) reportError(result);
+                    if (result.reportable !== false) console.warn(result);
                     return { success: false, metadata: result.metadata };
                 } else {
-                    addBreadcrumb(`Successfully activated ${id}`, { category: 'interceptor' });
                     return { success: true, metadata: result };
                 }
             },
@@ -178,7 +174,7 @@ const buildResolvers = (
                 const interceptor = interceptors[id];
                 if (!interceptor) throw new Error(`Unknown interceptor ${id}`);
 
-                await interceptor.deactivate(proxyPort, options).catch(reportError);
+                await interceptor.deactivate(proxyPort, options).catch(console.warn);
                 return { success: !interceptor.isActive(proxyPort) };
             },
             triggerUpdate: () => {

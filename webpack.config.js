@@ -1,22 +1,14 @@
 const webpack = require('webpack');
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
-const SentryPlugin = require('@sentry/webpack-plugin');
 
 const pjson = require('./package.json');
 
 const OUTPUT_DIR = path.resolve(__dirname, 'bundle');
 
-console.log(
-    process.env.SENTRY_AUTH_TOKEN
-    ? "* Webpack will upload source map to Sentry *"
-    : "Sentry source map upload disabled - no token set"
-);
-
 module.exports = {
     entry: {
         index: './src/index.ts',
-        'error-tracking': './src/error-tracking.ts'
     },
     output: {
         path: OUTPUT_DIR,
@@ -64,16 +56,7 @@ module.exports = {
         'win-version-info', // Native module
         'node-datachannel', // Native module
         'vm2', // Does odd things with require, can't be webpack'd
-        '_stream_wrap', // Used in httpolyglot only in old Node, where it's available
-        function (context, request, callback) {
-            if (context !== __dirname && request.endsWith('/error-tracking')) {
-                // Direct all requires of error-tracking to its entrypoint at the top level,
-                // except the root require that actually builds the entrypoint.
-                callback(null, 'commonjs ./error-tracking');
-            } else {
-                callback();
-            }
-        }
+        '_stream_wrap' // Used in httpolyglot only in old Node, where it's available
     ],
     plugins: [
         // Optimistic require for 'iconv' in 'encoding', falls back to 'iconv-lite'
@@ -101,15 +84,6 @@ module.exports = {
                 to: 'bl-resources'
             }]
         }),
-        // If SENTRY_AUTH_TOKEN is set, upload this sourcemap to Sentry
-        process.env.SENTRY_AUTH_TOKEN
-            ? new SentryPlugin({
-                release: pjson.version,
-                include: OUTPUT_DIR,
-                urlPrefix: '~/bundle',
-                validate: true
-            })
-            : { apply: () => {} },
         // Used to e.g. fix the relative path to the overrides directory
         new webpack.EnvironmentPlugin({ HTK_IS_BUNDLED: true })
     ],

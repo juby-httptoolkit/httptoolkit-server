@@ -61,9 +61,6 @@ jobs:
 
       - run: npm run build:release
         env:
-          SENTRY_AUTH_TOKEN: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN) || '' }}
-          SENTRY_ORG: http-toolkit
-          SENTRY_PROJECT: httptoolkit-server
           NPM_CONFIG_UNSAFE_PERM: true
 
       - run: DOCKER_HOST=$DIND_HOST xvfb-run npm run test:release
@@ -146,7 +143,7 @@ jobs:
       - name: Upload server release
         uses: svenstaro/upload-release-action@v2
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.PAT }}
           file: ./distributables/*/*
           file_glob: true
           tag: ${{ github.ref }}
@@ -154,7 +151,7 @@ jobs:
       - name: Upload latest manifest
         uses: svenstaro/upload-release-action@v2
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.PAT }}
           file: ./distributables/latest-manifest/*
           file_glob: true
           tag: latest-manifest
