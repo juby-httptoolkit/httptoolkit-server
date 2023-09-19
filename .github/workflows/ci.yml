@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v3
         with:
-          node-version: 16.18.0
+          node-version: 16.20.1
 
       - run: npm install -g npm@^8
 
@@ -63,7 +63,7 @@ jobs:
         env:
           NPM_CONFIG_UNSAFE_PERM: true
 
-      - run: DOCKER_HOST=$DIND_HOST xvfb-run npm run test:release
+      - run: DOCKER_HOST=$DIND_HOST xvfb-run npm run test:integration:release
 
       - uses: actions/upload-artifact@v3
         with:

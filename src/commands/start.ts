@@ -40,6 +40,8 @@ class HttpToolkitServer extends Command {
     async run() {
         const { flags } = this.parse(HttpToolkitServer);
 
+        this.setProcessTitle();
+
         this.cleanupOldServers(); // Async cleanup old server versions
 
         await runHTK({
@@ -49,6 +51,20 @@ class HttpToolkitServer extends Command {
             console.warn(error);
             throw error;
         });
+    }
+
+    setProcessTitle() {
+        if (process.platform === 'win32') return; // Not possible on Windows, as far as I can tell.
+
+        // Set the process title for easier management in activity monitor etc. This has some limitations,
+        // see https://nodejs.org/api/process.html#processtitle for details. In our case it's v likely to
+        // work regardless, as the full paths used in the desktop app are fairly long already, plus the
+        // path to the 'run' bin plus 'start', but we include a shorter fallback just in case too:
+        const currentProcessTitle = [process.argv0, ...process.argv.slice(1)].join(' ');
+        process.title = currentProcessTitle.length > 18
+            ? "HTTP Toolkit Server"
+            : "htk-server";
+
     }
 
     // On startup, we want to kill any downloaded servers that are not longer necessary
@@ -87,7 +103,7 @@ class HttpToolkitServer extends Command {
             return;
         }
 
-        const maybeReportError = (error: Error & { code?: string }) => {
+        const maybeLogError = (error: Error & { code?: string }) => {
             if ([
                 'EBUSY',
                 'EPERM'
@@ -104,7 +120,7 @@ class HttpToolkitServer extends Command {
             // a new server standalone (not just from an update), because otherwise the
             // update dir can end up in a broken state. Better to clear it completely.
             console.log("Downloaded server directory is entirely outdated, deleting it");
-            deleteFolder(serverUpdatesPath).catch(maybeReportError);
+            deleteFolder(serverUpdatesPath).catch(maybeLogError);
         } else {
             // Some of the servers are outdated, but not all (maybe it includes us).
             // Async delete all server versions older than this currently running version.
@@ -113,7 +129,7 @@ class HttpToolkitServer extends Command {
 
                 if (version && semver.lt(version, currentVersion)) {
                     console.log(`Deleting old server ${filename}`);
-                    deleteFolder(path.join(serverUpdatesPath, filename)).catch(maybeReportError);
+                    deleteFolder(path.join(serverUpdatesPath, filename)).catch(maybeLogError);
                 }
             });
         }

@@ -5,9 +5,11 @@ import { SpawnOptions } from 'child_process';
 import { APP_ROOT } from '../constants';
 import { HtkConfig } from '../config';
 
-import { getAvailableBrowsers, launchBrowser, BrowserInstance } from '../browsers';
 import { delay } from '../util/promise';
 import { isErrorLike } from '../util/error';
+import { isSnap, getSnapConfigPath } from '../util/snap';
+
+import { launchBrowser, BrowserInstance, getBrowserDetails } from '../browsers';
 import { readFile, canAccess, deleteFolder } from '../util/fs';
 import { windowsKill, spawnToResult } from '../util/process-management';
 import { MessageServer } from '../message-server';
@@ -72,16 +74,12 @@ export class FreshFirefox implements Interceptor {
 
     constructor(private config: HtkConfig) { }
 
-    private readonly firefoxProfilePath = path.join(this.config.configPath, 'firefox-profile');
-
     isActive(proxyPort: number | string) {
         return browsers[proxyPort] != null && !!browsers[proxyPort].pid;
     }
 
     async isActivable() {
-        const availableBrowsers = await getAvailableBrowsers(this.config.configPath);
-
-        const firefoxBrowser = _.find(availableBrowsers, { name: 'firefox' });
+        const firefoxBrowser = await getBrowserDetails(this.config.configPath, 'firefox');
 
         return !!firefoxBrowser && // Must have Firefox installed
             parseInt(firefoxBrowser.version.split('.')[0], 0) >= 58 && // Must use cert9.db
@@ -89,6 +87,7 @@ export class FreshFirefox implements Interceptor {
     }
 
     async startFirefox(
+        profilePath: string,
         initialServer: MessageServer | CertCheckServer,
         proxyPort?: number,
         existingPrefs = {}
@@ -97,7 +96,7 @@ export class FreshFirefox implements Interceptor {
 
         const browser = await launchBrowser(initialUrl, {
             browser: 'firefox',
-            profile: this.firefoxProfilePath,
+            profile: profilePath,
             proxy: proxyPort ? `127.0.0.1:${proxyPort}` : undefined,
             prefs: _.assign(
                 existingPrefs,
@@ -183,7 +182,7 @@ export class FreshFirefox implements Interceptor {
     }
 
     // Create the profile. We need to run FF to do its setup, then close it & edit more ourselves.
-    async setupFirefoxProfile() {
+    async setupFirefoxProfile(profilePath: string) {
         const messageServer = new MessageServer(
             this.config,
             `HTTP Toolkit is preparing a Firefox profile, please wait...`
@@ -192,7 +191,7 @@ export class FreshFirefox implements Interceptor {
 
         let messageShown: Promise<void> | true = messageServer.waitForSuccess().catch(console.warn);
 
-        profileSetupBrowser = await this.startFirefox(messageServer);
+        profileSetupBrowser = await this.startFirefox(profilePath, messageServer);
         profileSetupBrowser.process.once('close', (exitCode) => {
             console.log("Profile setup Firefox closed");
             messageServer.stop();
@@ -200,7 +199,7 @@ export class FreshFirefox implements Interceptor {
 
             if (messageShown !== true) {
                 console.warn(`Firefox profile setup failed with code ${exitCode}`);
-                deleteFolder(this.firefoxProfilePath).catch(console.warn);
+                deleteFolder(profilePath).catch(console.warn);
             }
         });
 
@@ -221,7 +220,7 @@ export class FreshFirefox implements Interceptor {
         const certUtilResult = await spawnToResult(
             certutil.command, [
                 '-A',
-                '-d', `sql:${this.firefoxProfilePath}`,
+                '-d', `sql:${profilePath}`,
                 '-t', 'C,,',
                 '-i', this.config.https.certPath,
                 '-n', 'HTTP Toolkit'
@@ -239,7 +238,14 @@ export class FreshFirefox implements Interceptor {
     async activate(proxyPort: number) {
         if (this.isActive(proxyPort) || !!profileSetupBrowser) return;
 
-        const firefoxPrefsFile = path.join(this.firefoxProfilePath, 'prefs.js');
+        const browserDetails = await getBrowserDetails(this.config.configPath, 'firefox');
+        if (!browserDetails) throw new Error('Firefox could not be detected');
+
+        const profilePath = await isSnap(browserDetails.command)
+            ? path.join(await getSnapConfigPath('firefox'), 'profile')
+            : path.join(this.config.configPath, 'firefox-profile');
+
+        const firefoxPrefsFile = path.join(profilePath, 'prefs.js');
 
         let existingPrefs: _.Dictionary<any> = {};
 
@@ -249,7 +255,7 @@ export class FreshFirefox implements Interceptor {
             This helps avoid initial Firefox profile setup request noise, and tidies up some awkward UX where
             firefox likes to open extra welcome windows/tabs on first run.
             */
-            await this.setupFirefoxProfile();
+            await this.setupFirefoxProfile(profilePath);
         }
 
         // We need to preserve & reuse any existing preferences, to avoid issues
@@ -271,7 +277,7 @@ export class FreshFirefox implements Interceptor {
         const certCheckServer = new CertCheckServer(this.config);
         await certCheckServer.start("https://amiusing.httptoolkit.tech");
 
-        const browser = await this.startFirefox(certCheckServer, proxyPort, existingPrefs);
+        const browser = await this.startFirefox(profilePath, certCheckServer, proxyPort, existingPrefs);
 
         let certCheckSuccessful: boolean | undefined;
         certCheckServer.waitForSuccess().then(() => {
@@ -299,7 +305,7 @@ export class FreshFirefox implements Interceptor {
                         ? "failed"
                         : "did not complete"
                 } with FF exit code ${exitCode}`);
-                deleteFolder(this.firefoxProfilePath).catch(console.warn);
+                deleteFolder(profilePath).catch(console.warn);
             }
         });
 

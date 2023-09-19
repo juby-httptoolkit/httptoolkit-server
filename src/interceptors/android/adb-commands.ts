@@ -4,6 +4,7 @@ import adb, * as Adb from '@devicefarmer/adbkit';
 import { isErrorLike } from '../../util/error';
 import { delay, waitUntil } from '../../util/promise';
 import { getCertificateFingerprint, parseCert } from '../../certificates';
+import { streamToBuffer } from '../../util/stream';
 
 export const ANDROID_TEMP = '/data/local/tmp';
 export const SYSTEM_CA_PATH = '/system/etc/security/cacerts';
@@ -66,7 +67,7 @@ export const getConnectedDevices = batchCalls(async (adbClient: Adb.Client) => {
     try {
         const devices = await (adbClient.listDevices() as Promise<Adb.Device[]>);
         return devices
-            .filter((d: { type: string }) => // Required until https://github.com/DeviceFarmer/adbkit/pull/437 is merged
+            .filter((d) =>
                 d.type !== 'offline' &&
                 d.type !== 'unauthorized' &&
                 !d.type.startsWith("no permissions")
@@ -116,7 +117,11 @@ async function run(
     return Promise.race([
         adbClient.shell(command)
             .then(adb.util.readAll)
-            .then((buffer: Buffer) => buffer.toString('utf8')),
+            .then((buffer: Buffer) => buffer.toString('utf8'))
+            .then((result) => {
+                console.debug("Android command", command, "returned", `\`${result.trimEnd()}\``);
+                return result;
+            }),
         ...(options.timeout
             ? [
                 delay(options.timeout)
@@ -124,7 +129,10 @@ async function run(
             ]
             : []
         )
-    ]);
+    ]).catch((e) => {
+        console.debug("Android command", command, "threw", e.message);
+        throw e;
+    });
 }
 
 export async function pushFile(
@@ -133,8 +141,7 @@ export async function pushFile(
     path: string,
     mode?: number
 ) {
-    const transfer = await adbClient.push(contents as any, path, mode);
-    // Any required until https://github.com/DeviceFarmer/adbkit/pull/436 is released
+    const transfer = await adbClient.push(contents, path, mode);
 
     return new Promise((resolve, reject) => {
         transfer.on('end', resolve);
@@ -143,49 +150,83 @@ export async function pushFile(
 }
 
 const runAsRootCommands = [
-    // 'su' as available on official emulators:
+    // Maybe we're already root?
+    (...cmd: string[]) => [...cmd],
+    // Su on many physical rooted devices requires quotes. Adbkit automatically quotes
+    // each argument in the array, so we just have to make it a single arg:
+    (...cmd: string[]) => ['su', '-c', cmd.join(' ')],
+    // But sometimes it doesn't like them, so try that too:
+    (...cmd: string[]) => ['su', '-c', ...cmd],
+    // 'su' as available on official emulators, no quoting of commands required:
     (...cmd: string[]) => ['su', 'root', ...cmd],
-    // Su on many physical rooted devices requires quotes:
-    (...cmd: string[]) => ['su', '-c', `'${cmd.join(' ')}'`]
+    // 'su' with a single-arg command here too, just in case:
+    (...cmd: string[]) => ['su', 'root', cmd.join(' ')]
 ];
 
 type RootCmd = (...cmd: string[]) => string[];
 
 export async function getRootCommand(adbClient: Adb.DeviceClient): Promise<RootCmd | undefined> {
-    // Run whoami with each of the possible root commands
-    const rootCheckResults = await Promise.all(
-        runAsRootCommands.map((runAsRoot) =>
-            run(adbClient, runAsRoot('whoami'), { timeout: 1000 }).catch(console.log)
-            .then((whoami) => ({ cmd: runAsRoot, whoami }))
+    const rootTestScriptPath = `${ANDROID_TEMP}/htk-root-test.sh`;
+
+    try {
+        // Just running 'whoami' doesn't fully check certain tricky cases around how the root commands
+        // handle multiple arguments etc. Pushing & running this script is an accurate test of which
+        // root mechanisms will actually work on this device:
+        let rootTestCommand = ['sh', rootTestScriptPath];
+        try {
+            await pushFile(adbClient, stringAsStream(`
+                set -e # Fail on error
+                whoami # Log the current user name, to confirm if we're root
+            `), rootTestScriptPath, 0o444);
+        } catch (e) {
+            console.log(`Couldn't write root test script to ${rootTestScriptPath}`, e);
+            // Ok, so we can't write the test script, but let's still test for root via whoami directly,
+            // because maybe if we get root then that won't be a problem
+            rootTestCommand = ['whoami'];
+        }
+
+        // Run our whoami script with each of the possible root commands
+        const rootCheckResults = await Promise.all(
+            runAsRootCommands.map((runAsRoot) =>
+                run(adbClient, runAsRoot(...rootTestCommand), { timeout: 1000 }).catch(console.log)
+                .then((whoami) => ({ cmd: runAsRoot, whoami }))
+            )
         )
-    )
 
-    // Filter to just commands that successfully printed 'root'
-    const validRootCommands = rootCheckResults
-        .filter((result) => (result.whoami || '').trim() === 'root')
-        .map((result) => result.cmd);
+        // Filter to just commands that successfully printed 'root'
+        const validRootCommands = rootCheckResults
+            .filter((result) => (result.whoami || '').trim() === 'root')
+            .map((result) => result.cmd);
 
-    if (validRootCommands.length >= 1) return validRootCommands[0];
+        if (validRootCommands.length >= 1) return validRootCommands[0];
 
-    // If no explicit root commands are available, try to restart adb in root
-    // mode instead. If this works, *all* commands will run as root.
-    // We prefer explicit "su" calls if possible, to limit access & side effects.
-    await adbClient.root().catch((e: any) => {
-        if (isErrorLike(e) && e.message?.includes("adbd is already running as root")) return;
-        else console.log(e);
-    });
+        // If no explicit root commands are available, try to restart adb in root
+        // mode instead. If this works, *all* commands will run as root.
+        // We prefer explicit "su" calls if possible, to limit access & side effects.
+        await adbClient.root().catch((e: any) => {
+            if (isErrorLike(e) && e.message?.includes("adbd is already running as root")) return;
+            else console.log(e);
+        });
 
-    // Sometimes switching to root can disconnect ADB devices, so double-check
-    // they're still here, and wait a few seconds for them to come back if not.
+        // Sometimes switching to root can disconnect ADB devices, so double-check
+        // they're still here, and wait a few seconds for them to come back if not.
 
-    await delay(500); // Wait, since they may not disconnect immediately
-    const whoami = await waitUntil(250, 10, (): Promise<string | false> => {
-        return run(adbClient, ['whoami']).catch(() => false)
-    }).catch(console.log);
+        await delay(500); // Wait, since they may not disconnect immediately
+        const whoami = await waitUntil(250, 10, (): Promise<string | false> => {
+            return run(adbClient, rootTestCommand, { timeout: 1000 }).catch(() => false)
+        }).catch(console.log);
 
-    return (whoami || '').trim() === 'root'
-        ? (...cmd: string[]) => cmd // All commands now run as root
-        : undefined; // Still not root, no luck.
+        return (whoami || '').trim() === 'root'
+            ? (...cmd: string[]) => cmd // All commands now run as root
+            : undefined; // Still not root, no luck.
+    } catch (e) {
+        console.error(e);
+        console.error('ADB root check crashed');
+        return undefined;
+    } finally {
+        // Try to clean up the root test script, just to be tidy
+        run(adbClient, ['rm', '-f', rootTestScriptPath]).catch(() => {});
+    }
 }
 
 export async function hasCertInstalled(
@@ -198,14 +239,7 @@ export async function hasCertInstalled(
         const certStream = await adbClient.pull(certPath);
 
         // Wait until it's clear that the read is successful
-        const data = await new Promise<Buffer>((resolve, reject) => {
-            const data: Buffer[] = [];
-            certStream.on('data', (d: Buffer) => data.push(d));
-            certStream.on('end', () => resolve(Buffer.concat(data)));
-
-            certStream.on('error', reject);
-        });
-
+        const data = await streamToBuffer(certStream);
 
         // The device already has an HTTP Toolkit cert. But is it the right one?
         const existingCert = parseCert(data.toString('utf8'));
@@ -238,7 +272,11 @@ export async function injectSystemCertificate(
             mkdir -p -m 700 /data/local/tmp/htk-ca-copy
 
             # Copy out the existing certificates
-            cp /system/etc/security/cacerts/* /data/local/tmp/htk-ca-copy/
+            if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
+                cp /apex/com.android.conscrypt/cacerts/* /data/local/tmp/htk-ca-copy/
+            else
+                cp /system/etc/security/cacerts/* /data/local/tmp/htk-ca-copy/
+            fi
 
             # Create the in-memory mount on top of the system certs folder
             mount -t tmpfs tmpfs /system/etc/security/cacerts
@@ -253,6 +291,50 @@ export async function injectSystemCertificate(
             chown root:root /system/etc/security/cacerts/*
             chmod 644 /system/etc/security/cacerts/*
             chcon u:object_r:system_file:s0 /system/etc/security/cacerts/*
+
+            echo 'System cacerts setup completed'
+
+            # Deal with the APEX overrides in Android 14+, which need injecting into each namespace:
+            if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
+                echo 'Injecting certificates into APEX cacerts'
+
+                # When the APEX manages cacerts, we need to mount them at that path too. We can't do
+                # this globally as APEX mounts are namespaced per process, so we need to inject a
+                # bind mount for this directory into every mount namespace.
+
+                # First we get the Zygote process(es), which launch each app
+                ZYGOTE_PID=$(pidof zygote || true)
+                ZYGOTE64_PID=$(pidof zygote64 || true)
+                # N.b. some devices appear to have both!
+
+                # Apps inherit the Zygote's mounts at startup, so we inject here to ensure all newly
+                # started apps will see these certs straight away:
+                for Z_PID in "$ZYGOTE_PID $ZYGOTE64_PID"; do
+                    # We use 'echo' below to trim spaces
+                    nsenter --mount=/proc/$(echo $Z_PID)/ns/mnt -- \
+                        /bin/mount --bind /system/etc/security/cacerts /apex/com.android.conscrypt/cacerts
+                done
+
+                echo 'Zygote APEX certificates remounted'
+
+                # Then we inject the mount into all already running apps, so they see these certs immediately.
+
+                # Get the PID of every process whose parent is one of the Zygotes:
+                APP_PIDS=$(
+                    echo "$ZYGOTE_PID $ZYGOTE64_PID" | \
+                    xargs -n1 ps -o 'PID' -P | \
+                    grep -v PID
+                )
+
+                # Inject into the mount namespace of each of those apps:
+                for PID in $APP_PIDS; do
+                    nsenter --mount=/proc/$PID/ns/mnt -- \
+                        /bin/mount --bind /system/etc/security/cacerts /apex/com.android.conscrypt/cacerts &
+                done
+                wait # Launched in parallel - wait for completion here
+
+                echo "APEX certificates remounted for $(echo $APP_PIDS | wc -w) apps"
+            fi
 
             # Delete the temp cert directory & this script itself
             rm -r /data/local/tmp/htk-ca-copy
@@ -269,7 +351,10 @@ export async function injectSystemCertificate(
 
     // Actually run the script that we just pushed above, as root
     const scriptOutput = await run(adbClient, runAsRoot('sh', injectionScriptPath));
-    console.log(scriptOutput);
+
+    if (!scriptOutput.includes("System cert successfully injected")) {
+        throw new Error('System certificate injection failed');
+    }
 }
 
 export async function setChromeFlags(

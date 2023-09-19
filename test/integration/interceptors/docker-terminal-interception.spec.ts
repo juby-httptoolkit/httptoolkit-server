@@ -7,15 +7,16 @@ import { ProxySettingCallback } from 'mockttp';
 import { expect } from 'chai';
 
 import { setupTest } from './interceptor-test-utils';
-import { spawnToResult } from '../../src/util/process-management';
-import { delay } from '../../src/util/promise';
+import { FIXTURES_DIR } from '../../test-util';
+import { spawnToResult } from '../../../src/util/process-management';
+import { delay } from '../../../src/util/promise';
 
-import { getTerminalEnvVars } from '../../src/interceptors/terminal/terminal-env-overrides';
+import { getTerminalEnvVars } from '../../../src/interceptors/terminal/terminal-env-overrides';
 
 import {
     startDockerInterceptionServices,
     stopDockerInterceptionServices
-} from '../../src/interceptors/docker/docker-interception-services';
+} from '../../../src/interceptors/docker/docker-interception-services';
 
 const testSetup = setupTest();
 
@@ -52,7 +53,7 @@ describe('Docker CLI interception', function () {
             // Build the target image (may already have been built by the attachment tests)
             const { exitCode: buildExitCode, stdout: buildStdout } = await spawnToResult(
                 'docker', ['build', '.', '-q'],
-                { cwd: path.join(__dirname, '..', 'fixtures', 'docker', target.toLowerCase()) },
+                { cwd: path.join(FIXTURES_DIR, 'docker', target.toLowerCase()) },
                 true
             );
 
@@ -63,7 +64,7 @@ describe('Docker CLI interception', function () {
             const { server, httpsConfig} = await testSetup;
             const mainRule = await server.forGet('https://example.test').thenReply(200);
 
-            const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+            const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
             childProc.spawn(
                 'docker', ['run', '--rm', imageId, 'https://example.test'],
@@ -94,7 +95,7 @@ describe('Docker CLI interception', function () {
 
         const mainRule = await server.forGet("https://example.test").thenReply(200);
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         const { exitCode, stdout, stderr } = await spawnToResult(
             'docker', ['run', '--rm', 'node:14', '-e', `require("https").get("https://example.test")`],
@@ -118,11 +119,11 @@ describe('Docker CLI interception', function () {
 
         const mainRule = await server.forAnyRequest().thenReply(200, "Mock response\n");
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         const { exitCode, stdout, stderr } = await spawnToResult('docker', ['build', '.'], {
             env: { ...process.env, ...terminalEnvOverrides },
-            cwd: path.join(__dirname, '..', 'fixtures', 'docker', 'requests-in-build')
+            cwd: path.join(FIXTURES_DIR, 'docker', 'requests-in-build')
         }, true);
 
         expect(exitCode).to.equal(0);
@@ -184,7 +185,7 @@ Successfully built <hash>
     it("should support proxying 'docker exec'", async function () {
         const { server, httpsConfig } = await testSetup;
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         // Launch a background Node.js container that stays running for 10 seconds
         const runResult = await spawnToResult(
@@ -224,14 +225,14 @@ Successfully built <hash>
             });
 
         // Create non-intercepted docker-compose containers, like normal use:
-        const composeRoot = path.join(__dirname, '..', 'fixtures', 'docker', 'compose');
+        const composeRoot = path.join(FIXTURES_DIR, 'docker', 'compose');
         await spawnToResult(
             'docker-compose', ['create', '--force-recreate', '--build'],
             { cwd: composeRoot },
             true
         );
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         // "DC Up" the same project, but in an intercepted env. Should ignore the existing containers,
         // create new intercepted containers, and then up those as normal.
@@ -273,14 +274,14 @@ Successfully built <hash>
             });
 
         // Create non-intercepted docker-compose containers, like normal use:
-        const composeRoot = path.join(__dirname, '..', 'fixtures', 'docker', 'compose');
+        const composeRoot = path.join(FIXTURES_DIR, 'docker', 'compose');
         await spawnToResult(
             'docker-compose', ['-f', 'docker-compose.networks.yml', 'create', '--force-recreate', '--build'],
             { cwd: composeRoot },
             true
         );
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         // "DC Up" the same project, but in an intercepted env. Should ignore the existing containers,
         // create new intercepted containers, and then up those as normal.
@@ -315,7 +316,7 @@ Successfully built <hash>
     it("should clean up containers after shutdown", async () => {
         const { server, httpsConfig } = await testSetup;
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         const uninterceptedResult = await spawnToResult('docker', ['create', 'node:14']);
 
@@ -357,7 +358,7 @@ Successfully built <hash>
         const { server, httpsConfig } = await testSetup;
         const docker = new Docker();
 
-        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env, {});
+        const terminalEnvOverrides = getTerminalEnvVars(server.port, httpsConfig, process.env);
 
         // Tunnel doesn't start preemptively:
         await delay(500);

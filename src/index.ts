@@ -16,15 +16,15 @@ import {
 
 import updateCommand from '@oclif/plugin-update/lib/commands/update';
 
-import { HttpToolkitServerApi } from './api-server';
+import { HttpToolkitServerApi } from './api/api-server';
 import { checkBrowserConfig } from './browsers';
-import { MOCKTTP_ALLOWED_ORIGINS } from './constants';
+import { IS_PROD_BUILD, MOCKTTP_ALLOWED_ORIGINS } from './constants';
 
 import { delay } from './util/promise';
 import { isErrorLike } from './util/error';
 import { readFile, checkAccess, writeFile, ensureDirectoryExists } from './util/fs';
 
-import { registerShutdownHandler } from './shutdown';
+import { registerShutdownHandler, shutdown } from './shutdown';
 import { getTimeToCertExpiry, parseCert } from './certificates';
 
 import {
@@ -32,6 +32,7 @@ import {
     stopDockerInterceptionServices
 } from './interceptors/docker/docker-interception-services';
 import { clearWebExtensionConfig, updateWebExtensionConfig } from './webextension';
+import { HttpClient } from './client/http-client';
 
 const APP_NAME = "HTTP Toolkit";
 
@@ -75,6 +76,8 @@ function checkCertExpiry(certContents: string): void {
     }
 }
 
+let shutdownTimer: NodeJS.Timeout | undefined;
+
 function manageBackgroundServices(
     standalone: PluggableAdmin.AdminServer<{
         http: MockttpAdminPlugin,
@@ -82,7 +85,15 @@ function manageBackgroundServices(
     }>,
     httpsConfig: { certPath: string, certContent: string }
 ) {
+    let activeSessions = 0;
+
     standalone.on('mock-session-started', async ({ http, webrtc }, sessionId) => {
+        activeSessions += 1;
+        if (shutdownTimer) {
+            clearTimeout(shutdownTimer);
+            shutdownTimer = undefined;
+        }
+
         const httpProxyPort = http.getMockServer().port;
 
         console.log(`Mock session started, http on port ${
@@ -103,6 +114,7 @@ function manageBackgroundServices(
     });
 
     standalone.on('mock-session-stopping', ({ http }) => {
+        activeSessions -= 1;
         const httpProxyPort = http.getMockServer().port;
 
         stopDockerInterceptionServices(httpProxyPort, ruleParameters)
@@ -111,6 +123,32 @@ function manageBackgroundServices(
         });
 
         clearWebExtensionConfig(httpProxyPort);
+
+        // In some odd cases, the server can end up running even though all UIs & desktop have exited
+        // completely. This can be problematic, as it leaves the server holding ports that HTTP Toolkit
+        // needs, and blocks future startups. To avoid this, if no Mock sessions are running at all
+        // for 10 minutes, the server shuts down automatically. Skipped for dev, where that might be OK.
+        // This should catch even hard desktop shell crashes, as sessions shut down automatically if the
+        // client websocket becomes non-responsive.
+        // We skip this on Mac, where apps don't generally close when the last window closes.
+        if (activeSessions <= 0 && IS_PROD_BUILD && process.platform !== 'darwin') {
+            if (shutdownTimer) {
+                clearTimeout(shutdownTimer);
+                shutdownTimer = undefined;
+            }
+
+            // We do a two-step timer here: 1 minute then a logged warning, then 9 more minutes
+            // until an automatic server shutdown:
+            shutdownTimer = setTimeout(() => {
+                if (activeSessions !== 0) return;
+                console.log('Server is inactive, preparing for auto-shutdown...');
+
+                shutdownTimer = setTimeout(() => {
+                    if (activeSessions !== 0) return;
+                    shutdown(99, '10 minutes inactive');
+                }, 1000 * 60 * 9).unref();
+            }, 1000 * 60 * 1).unref();
+        }
     });
 }
 
@@ -183,29 +221,47 @@ export async function runHTK(options: {
     console.log('Standalone server started in', standaloneSetupTime - certSetupTime, 'ms');
 
     // Start the HTK server API
-    const apiServer = new HttpToolkitServerApi({
-        configPath,
-        authToken: options.authToken,
-        https: httpsConfig
-    }, () => standalone.ruleParameterKeys);
+    const apiServer = new HttpToolkitServerApi(
+        { configPath, authToken: options.authToken, https: httpsConfig },
+        new HttpClient(ruleParameters),
+        () => standalone.ruleParameterKeys
+    );
 
     const updateMutex = new Mutex();
     apiServer.on('update-requested', () => {
         updateMutex.runExclusive(() =>
             (<Promise<void>> updateCommand.run(['stable']))
             .catch((error) => {
-                // Received successful update that wants to restart the server
-                if (isErrorLike(error) && error.code === 'EEXIT') {
-                    // Block future update checks for one hour.
+                if (isErrorLike(error)) {
+                    // Did we receive a successful update, that wants to restart the server:
+                    if (error.code === 'EEXIT') {
+                        // Block future update checks for 6 hours.
 
-                    // If we don't, we'll redownload the same update again every check.
-                    // We don't want to block it completely though, in case this server
-                    // stays open for a very long time.
-                    return delay(1000 * 60 * 60);
+                        // If we don't, we'll redownload the same update again every check.
+                        // We don't want to block it completely though, in case this server
+                        // stays open for a very long time.
+                        return delay(1000 * 60 * 60 * 6, { unref: true });
+                    }
+
+                    // Report any HTTP response errors cleanly & explicitly:
+                    if (error.statusCode) {
+                        let url: string | undefined;
+                        if ('http' in error) {
+                            const request = (error as any).http?.request;
+                            url = `${request?.protocol}//${request?.host}${request?.path}`
+                        }
+
+                        console.warn(`Failed to check for updates due to ${error.statusCode} response ${
+                            url
+                                ? `from ${url}`
+                                : 'from unknown URL'
+                        }`);
+                        return;
+                    }
                 }
 
-                console.log(error);
-                console.warn('Failed to check for updates');
+                console.log(error.message);
+                console.warn(`Failed to check for updates: ${error.message}`);
             })
         );
     });

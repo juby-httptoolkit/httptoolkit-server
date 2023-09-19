@@ -7,17 +7,21 @@ import { lookpath } from 'lookpath';
 
 import { isErrorLike } from './error';
 
-export const statFile = promisify(fs.stat);
-export const readFile = promisify(fs.readFile);
-export const readDir = promisify(fs.readdir);
-export const readLink = promisify(fs.readlink);
-export const deleteFile = promisify(fs.unlink);
-export const checkAccess = promisify(fs.access);
-export const chmod = promisify(fs.chmod);
-export const mkDir = promisify(fs.mkdir);
-export const writeFile = promisify(fs.writeFile);
-export const renameFile = promisify(fs.rename);
-export const copyFile = promisify(fs.copyFile);
+export const statFile = fs.promises.stat;
+export const readFile = fs.promises.readFile;
+export const readDir = fs.promises.readdir;
+export const readLink = fs.promises.readlink;
+export const deleteFile = fs.promises.unlink;
+export const deleteFolder = promisify(rimraf);
+export const checkAccess = fs.promises.access;
+export const chmod = fs.promises.chmod;
+export const mkDir = fs.promises.mkdir;
+export const writeFile = fs.promises.writeFile;
+export const copyFile = fs.promises.copyFile;
+export const appendOrCreateFile = fs.promises.appendFile;
+
+export const createReadStream = fs.createReadStream;
+export const createWriteStream = fs.createWriteStream;
 
 export const copyRecursive = async (from: string, to: string) => {
     // fs.cp is only available in Node 16.7.0+
@@ -51,13 +55,14 @@ export const getRealPath = async (targetPath: string): Promise<string | undefine
     }
 };
 
-export const deleteFolder = promisify(rimraf);
-
 export const ensureDirectoryExists = (path: string) =>
     checkAccess(path).catch(() => mkDir(path, { recursive: true }));
 
+export const resolveCommandPath = (path: string): Promise<string | undefined> =>
+    lookpath(path);
+
 export const commandExists = (path: string): Promise<boolean> =>
-    lookpath(path).then((result) => result !== undefined);
+    resolveCommandPath(path).then((result) => result !== undefined);
 
 export const createTmp = (options: tmp.Options = {}) => new Promise<{
     path: string,
@@ -72,7 +77,7 @@ export const createTmp = (options: tmp.Options = {}) => new Promise<{
 
 export const moveFile = async (oldPath: string, newPath: string) => {
     try {
-        await renameFile(oldPath, newPath);
+        await fs.promises.rename(oldPath, newPath);
     } catch (e) {
         if (isErrorLike(e) && e.code === 'EXDEV') {
             // Cross-device - can't rename files across partions etc.

@@ -25,17 +25,19 @@ export function getTerminalEnvVars(
         | { [key: string]: string | undefined }
         | 'posix-runtime-inherit'
         | 'powershell-runtime-inherit',
-    targetEnvConfig: {
-        httpToolkitHost?: string,
-        overridePath?: string,
-        targetPlatform?: NodeJS.Platform
-    } = {}
+
+    // All 3 of the below must be overriden together, or not at all, to avoid
+    // mixing platforms & default (platform-specific) paths
+    targetEnvConfig?: {
+        httpToolkitHost: string,
+        overridePath: string,
+        targetPlatform: NodeJS.Platform
+    }
 ): { [key: string]: string } {
-    const { overridePath, targetPlatform, httpToolkitHost } = {
+    const { overridePath, targetPlatform, httpToolkitHost } = targetEnvConfig ?? {
         httpToolkitHost: '127.0.0.1',
         overridePath: OVERRIDES_DIR,
-        targetPlatform: process.platform,
-        ...targetEnvConfig
+        targetPlatform: process.platform
     };
 
     const runtimeInherit = currentEnv === 'posix-runtime-inherit'
@@ -63,7 +65,16 @@ export function getTerminalEnvVars(
     const rubyGemsPath = joinPath(overridePath, RUBY_OVERRIDE_DIR);
     const pythonPath = joinPath(overridePath, PYTHON_OVERRIDE_DIR);
     const phpPath = joinPath(overridePath, PHP_OVERRIDE_DIR);
-    const nodePrependScript = joinPath(overridePath, ...NODE_PREPEND_SCRIPT);
+
+    // Node supports POSIX paths everywhere, and using those solves some weird issues
+    // when combining backslashes with quotes in Git Bash on Windows:
+    const nodePrependScript = path.posix.join(
+        ...(targetPlatform === 'win32'
+            ? overridePath.split(path.win32.sep)
+            : [overridePath]
+        ),
+        ...NODE_PREPEND_SCRIPT
+    );
     const nodePrependOption = `--require ${
         // Avoid quoting except when necessary, because node 8 doesn't support quotes here
         nodePrependScript.includes(' ')
@@ -78,10 +89,16 @@ export function getTerminalEnvVars(
     const binPath = joinPath(overridePath, BIN_OVERRIDE_DIR);
 
     return {
-        'http_proxy': proxyUrl,
+        // The main env vars, which in theory should be used by most well-behaved clients:
         'HTTP_PROXY': proxyUrl,
-        'https_proxy': proxyUrl,
         'HTTPS_PROXY': proxyUrl,
+        // The same in lowercase, to fully cover even oddly behaved cases:
+        'http_proxy': proxyUrl,
+        'https_proxy': proxyUrl,
+        // The same for WebSockets, as some clients treat these differently:
+        'WS_PROXY': proxyUrl,
+        'WSS_PROXY': proxyUrl,
+
         // Used by global-agent to configure node.js HTTP(S) defaults
         'GLOBAL_AGENT_HTTP_PROXY': proxyUrl,
         // Used by some CGI engines to avoid 'httpoxy' vulnerability
@@ -96,16 +113,18 @@ export function getTerminalEnvVars(
         'SSL_CERT_FILE': httpsConfig.certPath,
         // Trust cert when using Node 7.3.0+
         'NODE_EXTRA_CA_CERTS': httpsConfig.certPath,
-        // Trust cert when using Requests (Python)
-        'REQUESTS_CA_BUNDLE': httpsConfig.certPath,
+        // Deno:
+        'DENO_CERT': httpsConfig.certPath,
         // Trust cert when using Perl LWP
         'PERL_LWP_SSL_CA_FILE': httpsConfig.certPath,
         // Trust cert for HTTPS requests from Git
         'GIT_SSL_CAINFO': httpsConfig.certPath,
         // Trust cert in Rust's Cargo:
         'CARGO_HTTP_CAINFO': httpsConfig.certPath,
-        // Trust cert in CURL (only required when not using OpenSSL):
+        // Trust cert in CURL (only required when not using OpenSSL) and Python Requests:
         'CURL_CA_BUNDLE': httpsConfig.certPath,
+        // Trust our CA in the AWS CLI:
+        'AWS_CA_BUNDLE': httpsConfig.certPath,
 
         // Flag used by subprocesses to check they're running in an intercepted env
         'HTTP_TOOLKIT_ACTIVE': 'true',

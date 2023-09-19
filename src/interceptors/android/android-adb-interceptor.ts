@@ -7,6 +7,7 @@ import { HtkConfig } from '../../config';
 import { generateSPKIFingerprint } from 'mockttp';
 
 import { delay } from '../../util/promise';
+import { isErrorLike } from '../../util/error';
 import {
     ANDROID_TEMP,
     createAdbClient,
@@ -69,19 +70,13 @@ export class AndroidAdbInterceptor implements Interceptor {
         if (!(await deviceClient.isInstalled('tech.httptoolkit.android.v1'))) {
             console.log("App not installed, installing...");
             try {
-                await deviceClient.install(
-                    await streamLatestApk(this.config) as any
-                    // Any required until https://github.com/DeviceFarmer/adbkit/pull/436 is released
-                );
+                await deviceClient.install(await streamLatestApk(this.config));
             } catch (e) {
                 console.log("Resetting & retrying APK install, after initial failure:", e);
                 // This can fail due to connection issues (with the device or while downloading
                 // the APK) due to a corrupted APK. Reset the APKs and try again, just in case.
                 await clearAllApks(this.config);
-                await deviceClient.install(
-                    await streamLatestApk(this.config) as any
-                    // Any required until https://github.com/DeviceFarmer/adbkit/pull/436 is released
-                );
+                await deviceClient.install(await streamLatestApk(this.config));
             }
             console.log("App installed successfully");
 
@@ -146,7 +141,9 @@ export class AndroidAdbInterceptor implements Interceptor {
                         tunnelConnectFailures = 0;
                     } catch (e) {
                         tunnelConnectFailures += 1;
-                        console.log(`${options.deviceId} ADB tunnel failed`, e);
+                        console.log(`${options.deviceId} ADB tunnel failed`,
+                            isErrorLike(e) ? e.message : e
+                        );
 
                         if (tunnelConnectFailures >= 5) {
                             // After 10 seconds disconnected, give up
@@ -212,8 +209,9 @@ export class AndroidAdbInterceptor implements Interceptor {
                     0o444
                 );
 
-                await injectSystemCertificate(deviceClient, rootCmd, certPath);
-                console.log(`Cert injected`);
+                await injectSystemCertificate(deviceClient, rootCmd, certPath)
+                    .then(() => console.log('Cert injected'))
+                    .catch((e) => console.warn(e)); // Continue but log the failure
             } else {
                 console.log("Cert already installed, nothing to do");
             }
