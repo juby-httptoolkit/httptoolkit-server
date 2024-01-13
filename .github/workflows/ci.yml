@@ -29,6 +29,10 @@ jobs:
 
       - run: npm run build:src
 
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+
       - run: npm run build:release
         env:
           NPM_CONFIG_UNSAFE_PERM: true
