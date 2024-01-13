@@ -4,14 +4,14 @@ set -e
 
 ls -la *
 
-tar -xvzf ./distributables/v*/httptoolkit-server-*-$1-x64.tar.gz
+tar -xzf ./distributables/v*/httptoolkit-server-*-$1-x64.tar.gz
 
 echo "\nStarting server..."
 
 ./httptoolkit-server/bin/httptoolkit-server start &
 SERVER_PID=$!
 
-sleep 5
+sleep 10
 
 echo "\nTesting server..."
 

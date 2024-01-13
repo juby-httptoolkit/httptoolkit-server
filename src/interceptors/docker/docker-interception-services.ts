@@ -3,6 +3,7 @@ import { ProxySettingCallback } from 'mockttp';
 
 import { addShutdownHandler } from '../../shutdown';
 
+import { getDockerAddress } from './docker-utils';
 import { DOCKER_BUILD_LABEL } from './docker-build-injection';
 import { DOCKER_CONTAINER_LABEL } from './docker-commands';
 
@@ -75,9 +76,16 @@ export async function startDockerInterceptionServices(
     }
 
     // Log if Docker was not available at proxy start, and why, for debugging later:
-    isDockerAvailable({ logError: true }).then((isAvailable) => {
-        if (isAvailable) console.log('Connected to Docker');
-        // logError will log the specific not-available error, if this failed
+    isDockerAvailable({ logError: true }).then(async (isAvailable) => {
+        if (isAvailable) {
+            const dockerAddress = await getDockerAddress(new Docker());
+            console.log(`Connected to Docker at ${
+                'socketPath' in dockerAddress
+                ? dockerAddress.socketPath
+                : `tcp://${dockerAddress.host}:${dockerAddress.port}`
+            }`);
+        }
+        // logError:true will log the specific not-available error, if this failed
     });
 
     const networkMonitor = monitorDockerNetworkAliases(proxyPort);
