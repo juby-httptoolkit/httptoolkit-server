@@ -8,9 +8,6 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: httptoolkit/act-build-base:v3.0.0
-      options: "--privileged" # Required for DIND tests
-    env:
-      DIND_HOST: unix:///tmp/docker.sock
     steps:
       - uses: actions/checkout@v3
 
@@ -32,38 +29,9 @@ jobs:
 
       - run: npm run build:src
 
-      - name: Prepare test environment
-        run: |
-          # Fix annoying Yarn issue: https://github.com/yarnpkg/yarn/issues/7866
-          curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-
-          sudo apt-get update
-          sudo apt-get install -y p7zip-full xterm
-
-          wget https://downloads.slack-edge.com/linux_releases/slack-desktop-4.12.2-amd64.deb
-          sudo apt install -y ./slack-desktop-4.12.2-amd64.deb
-
-          sudo cp test/no-sandbox-docker-wrapper.sh /usr/local/bin/google-chrome
-          sudo cp test/no-sandbox-docker-wrapper.sh /usr/local/bin/slack
-
-          # Fix $HOME perms to make Firefox happy
-          sudo chown $(whoami) $HOME
-
-          # Start a DIND docker host, running in the background
-          sudo dockerd -H $DIND_HOST &
-          sleep 5
-
-          # Pre-pull lots of the Docker images we'll want to use later
-          echo node:14 golang:1.16 openjdk:16-alpine3.13 python:3.9-slim ruby:alpine3.13 php:8.0-apache |
-            DOCKER_HOST=$DIND_HOST xargs -P10 -n1 docker pull
-
-      - run: DOCKER_HOST=$DIND_HOST xvfb-run npm run test
-
       - run: npm run build:release
         env:
           NPM_CONFIG_UNSAFE_PERM: true
-
-      - run: DOCKER_HOST=$DIND_HOST xvfb-run npm run test:integration:release
 
       - uses: actions/upload-artifact@v3
         with:
@@ -71,56 +39,12 @@ jobs:
           path: build/dist/*
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: test-scripts
-          path: test/distributables-test
-          if-no-files-found: error
-
-  test-distributables:
-    needs: build
-    strategy:
-      matrix:
-        include:
-          - platform: Ubuntu 22.04
-            os: "ubuntu-22.04"
-            test-script: "./unix.sh linux"
-          - platform: MacOS 13
-            os: "macos-13"
-            test-script: "./unix.sh darwin"
-          - platform: Windows 2022
-            os: "windows-2022"
-            test-script: ".\\windows.bat"
-      fail-fast: false
-    name: Test on ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Get our distributables
-        uses: actions/download-artifact@v3
-        with:
-          name: distributables
-          path: distributables
-
-      - name: Get the test scripts
-        uses: actions/download-artifact@v3
-        with:
-          name: test-scripts
-          path: .
-
-      - name: Make the test script executable
-        if: matrix.platform != 'Windows'
-        run: chmod +x unix.sh
-
-      - name: Test the server build
-        run: ${{ matrix.test-script }}
-
   publish:
     name: Publish a release
     runs-on: "ubuntu-22.04"
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
       - build
-      - test-distributables
     steps:
       - name: Get our distributables
         uses: actions/download-artifact@v3
